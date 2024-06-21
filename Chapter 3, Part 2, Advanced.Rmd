@@ -1,0 +1,530 @@
+---
+title: "Chapter 3: Part 2, Trace Data Pre-processing"
+author: "Tudor Cristea"
+output:
+  word_document:
+    toc: true
+    toc_depth: 3
+  html_document:
+    toc: true
+    toc_depth: '3'
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Main Objective
+
+In the previous part (Chapter 3, Part 1, LINK), we introduced and explained basic programming concepts using the R language as a foundation for working with educational trace data. In this section (Chapter 3, Part 2), we will expand on that knowledge and focus more on LA by introducing essential functions to clean and prepare educational LMS data for the final analysis. While the functions presented are from R, the core principles are transferable to other environments. The primary objective is to present and explain how to prepare LMS trace data for further analysis. Understanding this process also allows you to understand and use the scripts with data analysis for the following two chapters, [Chapter 4 and Chapter 5]{.underline}. 
+
+## Data Merging
+
+### Selective function import
+
+Dealing with large datasets demands efficient storage and access methods. Various file formats have been developed to meet these needs, with the ".parquet" extension being one such example. Below is an illustration of how to read and load a parquet file in R. As this requires a new package which won't be used again in this script, we do not load the whole package, but select what function to import from the package. This is done by including the name of the package followed by "::" before the function. It is good practice to do this if you won't use the function again as it makes the script more efficient and less prone to errors due to unwanted interactions with other packages.
+
+```{r}
+
+#Import a parquet file with some optional arguments
+parquet<- arrow::read_parquet("example_parquet.snappy.parquet",
+                             col_types = cols(.default = "c"),
+                             na.strings=c("", "\\N")) 
+```
+
+The course IDs in our data are strings of numbers (ex. "10598") which R will load as a numeric class. If the numbers are too large, they might not save properly due to the 32-bit limit of R. Thus, it is recommended to save the IDs as strings of characters. You can do this by adding the optional argument `col_types= cols(.default= "c")`. Another optional argument we use is `na.strings = c("", "\\N")`. When loading the parquet file, missing values are saved as "\\N", which R reads as a string. This argument ensures that "\\N" is replaced with "" (an empty string), which R then interprets as `NA` (Not Available).
+
+<br><br>
+
+## Canvas Data Structure
+
+In data analysis, dealing with large datasets, often referred to as big data, is a common scenario. Big data is typically segmented into multiple datasets, which can enhance workflow efficiency by allowing the use of smaller subsets of data based on specific objectives. Canvas data, for instance, follows a similar pattern, as documented in the Canvas Data Portal (https://portal.inshosteddata.com/docs).
+
+To begin analyzing Canvas data, we usually start with the "requests" table, which contains three essential variables: timestamps, student/course IDs, and the URL or Learning Management System (LMS) feature used for each interaction. By leveraging the information in this table, we can further enrich our analysis by joining it with other tables available, providing more context to each click. Aside from the "requests" table, other example datasets such as "courses", "assignments", "discussions", and "quizzes" are also available. In this tutorial, we'll demonstrate how to load and merge each of these datasets with the "requests" table sequentially, enabling a comprehensive exploration of the data. You are encouraged to follow along and utilize the example datasets provided and the functions from previous sections to explore these datasets effectively. Since the tables are small, you can also click on them in the environment pane (top right) to check them once they are loaded. <br><br> Before proceeding, ensure that you have the "tidyverse" package installed in your R environment. The "tidyverse" package is a collection of R packages designed to work seamlessly together, offering a powerful toolkit for data manipulation and visualization. If you haven't already installed it, please do so, as we will be using it extensively throughout this tutorial.
+
+```{r, eval=F}
+install.packages("tidyverse")
+```
+
+```{r, message=F, warning=F}
+#Load the packages we need
+library(tidyverse)
+library(readxl)
+```
+
+<br><br>
+
+## Merging Datasets
+
+### **The _join() family**
+
+In order to merge the datasets, we will be using the `left_join()` function since we want to keep all the data in the requests dataset, while only adding the observations from another dataset, where present. Other functions part of the "_join" family are: `right_join()`, `inner_join()`, `full_join()`, `semi_join()`, and `anti_join()`, which follow different rules (e.g. `right_join` keep all observations from the right dataset). Check the others using the R documentation.
+
+<br>
+
+### **Merging datasets with the same key name**
+
+First, let's try to find the course where each click took place. We will load the "example_requests" and the "example_courses" datasets and merge them using the `left_join()` function. This function is part of the "\_join" family which can be found in the "tidyverse" package.
+
+```{r}
+#Import the tables
+requests <- read_excel("example_requests.xlsx")
+courses <- read_excel("example_courses.xlsx")
+
+#Left_join with the same variable name in both datasets
+req_crs<- left_join(requests, courses) 
+
+#Check the values from the added variables to see if the merging worked
+str(req_crs)
+```
+
+Since we did not mention the column we want to use for the merging, the function used the variable that has the same name in both datasets; that is the **Joining with by = join_by(course_id)** message. The column that is used for merging is called a key.
+
+<br>
+
+### **Merging datasets with different key names**
+
+Looking at the Canvas structure we can see that in many of the smaller tables the key name is "canvas_id". If the keys don't have the same names, we can specify it. Next, we will merge the previous dataset ("req_crs") with the "discussions".
+
+```{r}
+
+#Load the new dataset
+discussions<- read_excel("example_discussions.xlsx")
+
+#Not adding the "course_id" as a key also
+req_crs_disc<- left_join(req_crs, discussions, by= c("discussion_id"= "canvas_id")) 
+
+#It seems we have two "course_id" variables
+colnames(req_crs_disc)
+```
+
+We can see that now we have two "course_id" variables. One is from the original request dataset ("course_id.x") and one from the second dataset ("course_id.y"). This happened since we forgot to add the "course_id" variable as a key! Make sure to always consider this in order to avoid adding unnecessary variables to your dataset. Thus:
+
+```{r}
+#Merging using both keys
+req_crs_disc<- left_join(req_crs, discussions, 
+                       by= c("course_id", "discussion_id"= "canvas_id")) 
+
+#Now we have only one "course_id" variable, as expected
+colnames(req_crs_disc)
+```
+
+<br>
+
+### **Merging datasets with multiple keys and an identical variable name (suffixes)**
+
+Next, let's add some information about the assignment requests by merging "req_crs_disc" with the "assignments" dataset.
+
+```{r}
+#Import the new dataset
+assignments<- read_excel("example_assignments.xlsx")
+
+#Merging the datasets
+req_crs_disc_assgn<- left_join(req_crs_disc, assignments, 
+                       by= c("course_id", "assignment_id"= "canvas_id"))
+
+#We have two "title" variables
+colnames(req_crs_disc_assgn)
+```
+
+Now we have the same problem but with the "title" variable! Again, this happened since both the "discussions" and the "assignments" datasets have a variable called "title". We can avoid this by adding a suffix (through an optional argument) at the end of variables based on the dataset they come from. For example, we can add the suffix ".disc" for the "discussions" variables and ".assig" for the "assignments" variables.
+
+```{r}
+#Adding the suffixes
+req_crs_disc_assgn<- left_join(req_crs_disc, assignments, 
+                       by= c("course_id", "assignment_id"= "canvas_id"), 
+                       suffix = c(".disc", ".assig"))
+
+#Now it is clear where each "title" variable comes from
+colnames(req_crs_disc_assgn)
+```
+
+<br>
+
+### **Merging datasets using everything so far**
+
+Finally, let's merge with the "quizzes" dataset so we get the final dataset we want to use in our analyses. For this, we will merge "req_crs_disc_assgn" and "quizzes" to result in "req_crs_disc_assgn_quiz".
+
+```{r}
+#Import the necessary dataset
+quizzes<- read_excel("example_quizzes.xlsx") #loading the quizzes dataset
+
+#Merging the datasets with everything we learned so far
+req_crs_disc_assgn_quiz<- left_join(req_crs_disc_assgn, quizzes, 
+                       by= c("course_id", "quiz_id"= "canvas_id")) 
+
+#It does not seem to merge properly as the table has no values
+table(req_crs_disc_assgn_quiz$quiz_type) 
+
+#Checking the IDs from the requests table
+table(req_crs_disc_assgn$quiz_id) 
+#Checking the IDs from the quiz dataset
+table(quizzes$canvas_id) 
+```
+
+We tried the same method, but it didn't work. Upon checking each ID variable, we found the issue: the "canvas_id" from the quizzes has an extra "98000" in front of the actual ID. This discrepancy is common in Canvas data across multiple datasets. When merging datasets doesn't work, this should be the first thing you check. To fix this, you can either remove the extra string or replace it with an empty string (""). We can use `str_remove()` or `gsub()` for this task. Remember to save the modified variable! Additionally, since removing the string converts the variable into a character class, and it's not recommended to keep ID variables as numeric, we should convert the "quiz_id" variable to character class.
+
+```{r}
+#1. Removing the specific pattern of string
+quizzes$canvas_id<- str_remove(quizzes$canvas_id, "98000") 
+
+#OR
+
+#2. Replacing the string with "" but creating a new variable!
+quizzes$canvas_id2<- gsub("98000", "", quizzes$canvas_id) 
+
+#Check if the methods are equivalent by checking if the vectors are identical
+identical(quizzes$canvas_id, quizzes$canvas_id2)
+```
+
+```{r}
+#It seems that the keys have different classes
+class(req_crs_disc_assgn$quiz_id)== class(quizzes$canvas_id) 
+
+#We can change one of them using the "as.x()" functions
+req_crs_disc_assgn$quiz_id<- as.character(req_crs_disc_assgn$quiz_id)
+
+#Now the keys have the same class
+class(req_crs_disc_assgn$quiz_id)== class(quizzes$canvas_id) 
+```
+
+Now we can merge and create the final dataset:
+
+```{r}
+#Merging the datasets to get the final dataset 
+req_crs_disc_assgn_quiz<- left_join(req_crs_disc_assgn, quizzes, 
+                       by= c("course_id", "quiz_id"= "canvas_id")) 
+
+#Now it worked!
+table(req_crs_disc_assgn_quiz$quiz_type) 
+```
+
+<br><br>
+
+## **Counting NAs and Logical Values**
+
+The final dataset has many NAs where no information was available. We can use the `summary()` function to see how many there are, or the `sum()` and `is.na()` to count them per one specific variable. We can also count the present values using the "!" sign before the function. The exclamation sign negates a logical value, which is what the `is.na()` gives as a result.
+
+```{r}
+#The character 4 is not an NA (gives "FALSE" as a logical value result)
+is.na("4") 
+
+#NA is indeed NA (gives "TRUE" as a logical value result)
+is.na(NA) 
+
+#24 missing values 
+sum(is.na(req_crs_disc_assgn_quiz$quiz_id)) 
+
+#6 not missing values 
+sum(!is.na(req_crs_disc_assgn_quiz$quiz_id)) 
+```
+
+<br><br>
+
+## **Saving Datasets**
+
+Finally, we should save the new dataset. For this, we have to use the name of the dataset we want to save, followed by the path and the new name. Remember to always include the extension next to the file name!
+
+```{r}
+#Saving the "req_crs_disc_assgn_quiz" dataset as a .csv in the default path as "req_crs_disc_assgn_quiz"
+write.csv(req_crs_disc_assgn_quiz, "req_crs_disc_assgn_quiz.csv") 
+```
+
+<br><br>
+
+# Data Pre-processing
+
+In the previous section, we showed how to merge multiple datasets. While merging can be considered part of pre-processing, we're treating them separately in this guide due to Canvas' granular data structure. Typically, data cleaning and merging overlap and are not distinctly separate tasks. Next, we will use the **pipe operator (%\>%)** from the "tidyverse" to simplify data transformation and cleaning. The pipe operator lets you chain together a series of data transformations in a readable and concise way by passing the output of one function directly into the next function as an argument.
+
+## The **select()** Function
+
+We will start by creating datasets containing only a subset of variables. While there are various ways to accomplish this, we will be using the `select()` function from the "dplyr" package, which is part of the "tidyverse" suite of packages. We will do this by either keeping the variables we want or excluding the ones we don't want.
+
+```{r}
+#Selecting some of the variables from our dataset
+
+#1. Using the select() function without a pipe operator to keep some variables
+select_no_pipe<- select(req_crs_disc_assgn_quiz, student_id, course_id, assignment_id, 
+                        quiz_id, discussion_id, web_application_action,
+                        web_application_controller, course_name) 
+
+#2. Using the select function with the pipe operator to keep some variables
+select_with_pipe<- req_crs_disc_assgn_quiz %>%
+  select(student_id, course_id, assignment_id, quiz_id, discussion_id,
+         web_application_action, web_application_controller,
+         course_name) 
+
+#3. Using the select function with pipe operator to exclude some variables
+excluding_with_select<- req_crs_disc_assgn_quiz %>%
+  select(-timestamp, -url, -title.disc, -title.assig, -due_at, -message, 
+         -due_at, -scoring_policy, -name, -quiz_type, -posted_at, -canvas_id2)
+
+
+#Checking if the three datasets are identical
+identical(select_no_pipe, select_with_pipe) 
+identical(select_with_pipe, excluding_with_select) 
+```
+
+<br><br>
+
+## The **filter()** Function
+
+Another essential function is the `filter()` function. This is similar to `select()`, however, instead of keeping only variables/columns, the `filter()` function allows us to keep only datapoints/rows that meet a certain condition. For example, a good way to keep only requests on a certain LMS feature is to use the ID variables available to us: "assignment_id," "discussion_id," and "quiz_id." If an ID is present (!`NA`), it indicates that the request comes from that specific LMS feature.
+
+```{r}
+#!is.na() checks if the value is not NA, hence, present
+only_discussion<- req_crs_disc_assgn_quiz %>%
+  filter(!is.na(discussion_id)) 
+
+#The "quiz_id" variable has only NAs
+table(only_discussion$quiz_id)
+
+#The "discussion_id" variable has proper values
+table(only_discussion$discussion_id)
+```
+
+<br><br>
+
+## Requests vs. Clicks
+
+You may have noticed that "clicks" are never explicitly mentioned in the Canvas data structure or in the previous guides; although student trace data, such as clicks, are at the basis of Learning Analytics. Instead, we've been discussing "requests". Requests are log records generated by the server whenever the client (your browser) interacts with the Canvas server. A single click in Canvas can produce multiple request data points. For instance, when you open Canvas, an initial request is made as the server checks for new forum posts since your last session. Additional requests might also be generated to update which forum posts you've read and which ones are new. Working with Canvas data often involves distinguishing between requests that represent actual clicks and those that do not. I couldn't find an official guide on differentiating student clicks from requests, so below are my own methods.
+
+<br><br>
+
+## Separating Server Requests from Student Clicks
+
+The most consistent method I've found involves examining the "web_application_action" and "web_application_controller" columns. These variables indicate the "action" taken and the "target" of that action in Canvas. Although our sample data is small, our final dataset contained over 160 different actions and controllers! Actions like "create" and "show" are clearly clicks, whereas actions like "mark_entry_read" and "index" are not. Additionally, controllers with "_api" in their names are likely not clicks, as they usually represent the LMS server's response to student clicks.
+
+```{r}
+#Coupling the actions with their controllers
+table(req_crs_disc_assgn_quiz$web_application_action, 
+      req_crs_disc_assgn_quiz$web_application_controller)
+```
+
+<br>
+
+## Filtering the "web_application" variables for student clicks
+
+### Filtering one value from one variable
+
+```{r}
+#Filtering for "show" action
+surely_clicks_show<- req_crs_disc_assgn_quiz %>%
+  filter(web_application_action=="show") 
+
+#Checking which controllers have the "show" action
+table(surely_clicks_show$web_application_action,
+      surely_clicks_show$web_application_controller) 
+```
+
+<br>
+
+### Filtering multiple values from one variable
+
+We can also try to keep multiple action values, both "show" and "create". We can define them first in a different variable and use the **%in% operator** on it; this operator check if the values from one vector ("web_application_action") are present in another ("actions_keep"). If a match is found on a certain row, a logical value of "TRUE" is returned, which is used by the `filter()` function to keep that row.
+
+```{r}
+#Create string vector with the action names
+actions_keep<- c("show", "create") 
+
+#Filtering for multiple values from one variable
+surely_clicks_show_create<- req_crs_disc_assgn_quiz %>%
+  filter(web_application_action %in% actions_keep) 
+
+#Checking which controllers have the "show" or "create" action
+  table(surely_clicks_show_create$web_application_action,
+        surely_clicks_show_create$web_application_controller) 
+```
+
+<br>
+
+### Filtering multiple values from multiple variables
+
+Let's summarize everything covered in the guide so far. First, we will use `select()` to choose only the variables we want to work with. Then, we will use pipe operators to filter the actions we want to keep OR ("\|") exclude the API controllers we do not want to retain.
+
+```{r}
+#Make string vectors for values we want to filter at some points
+actions_keep<- c("show", "create")
+controllers_remove<- c("quizzes/quiz_submission_api", "discussion_topics_api",
+                       "wiki_pages_api")
+
+#Select and filter as described above
+only_clicks<- req_crs_disc_assgn_quiz %>%
+  select(timestamp, url, web_application_action, web_application_controller) %>%
+  filter(web_application_action %in% actions_keep | !web_application_controller %in%
+           controllers_remove) #notice the "!" sign!
+
+#Checking to see what's left
+table(only_clicks$web_application_action, 
+      only_clicks$web_application_controller) 
+```
+
+<br> Looking at what remains, we notice the "ping" action. Additionally, examining the timestamps of the ping actions reveals that some occur within the same second. Pings are requests that indicate if the user is still active and are automatically generated. Therefore, we can remove these from our data. This is a good starting point, as you can be certain that "pings" are always non-clicks.
+
+```{r}
+#Filter to keep only pings in order to check them
+only_pings<- req_crs_disc_assgn_quiz %>%
+  filter(web_application_action=="ping")
+
+#Checking the ping timestamps. Some occur exactly the same second, which is expected of pings
+table(only_pings$timestamp)
+
+#Filter out the pings
+final_clicks<- only_clicks %>%
+  filter(web_application_action!= "ping") #filtering out only one value
+
+#Checking again the actions and their controllers
+table(final_clicks$web_application_action, 
+      final_clicks$web_application_controller)
+```
+
+<br>
+
+## The URLs
+
+Another method that can help distinguish between requests and clicks is to examine the links in the URL variable in the requests dataset. While it's not advisable to rely solely on URLs, they can provide valuable insights during the data cleaning process, helping you better understand LMS usage and data structure. You can compare the request URL to the one in your browser by copying and pasting the request URL into your browser to see if it works, assuming you have access to the same courses. Additionally, you can use applications that log all HTML requests from your browser and then click on various Canvas features. This way, you can identify which requests result from actual clicks and which do not. Although these methods won't guarantee 100% accuracy, they will help you distinguish most differences, providing a sufficient basis for proper research.
+
+<br>
+
+## The **mutate()** Function
+
+There is still one dataset we haven't used yet: the "files" dataset. This dataset contains information about actual files uploaded to Canvas, such as lecture slides, homework, scientific articles students need to read, etc. Below you can see that the dataset does have an ID for the files (the typical "canvas_id"), yet the request table does not have a proper key!
+
+```{r}
+#Loading the "files" dataset
+files<- read_excel("example_files.xlsx") 
+
+#We can see this dataset has IDs for the files
+table(files$canvas_id) 
+
+#Let's create a new dataset only with file requests using the controller varaible
+only_files<- req_crs_disc_assgn_quiz %>%
+  filter(web_application_controller=="files") 
+
+#Sadly, the "requests" dataset does not have any ID to use as key with the "files" dataset
+colnames(only_files) 
+table(only_files$url)
+```
+
+<br> However, the `table()` function above shows that the request URLs do seem to have the ID at the end of the string. To address this, we will use the `mutate()` function to create a new variable containing only the file ID string, which we can then use to merge the two tables. We will also use regex patterns, which are "regular expressions" that can be used in search patterns. For example, in our case, we could look to keep only the string that comes after the last "/":
+
+```{r}
+#Create a new variable with mutate() to get the file IDs for merging
+req_crs_disc_assgn_quiz<- req_crs_disc_assgn_quiz %>%
+  mutate(file_canvas_id= gsub(".*files/*", "", url)) #this is the regex pattern for removing everything up to the last occurrence of "files/" in the url string, including "files/", if present, and assigns the result to the variable "file_canvas_id"
+  
+#Checking how the IDs look in the "files" dataset
+table(files$canvas_id) 
+```
+
+<br> Regular expression (or "RegEx") patterns can be quite confusing. We used the `gsub()` function because it looks for patterns (the first value in the function) and replaces them with the second value, which in our case is an empty string "" (nothing). Often, it's helpful to perform these replacements step-by-step by creating new variables in-between: first, remove the initial part of the string, then the "/", etc. Always check the documentation of the function you want to use, but also familiarize yourself with regex patterns since they are universal. Now we can merge the "req_crs_disc_assgn_quiz" table with "files":
+
+```{r}
+#Changing the canvas_id to character type
+files$canvas_id<- as.character(files$canvas_id) 
+
+#Merging "req_crs_disc_assgn_quiz" with "files" based on the new ID variable from the url variable while also adding suffixes
+req_crs_disc_assgn_quiz_files<- req_crs_disc_assgn_quiz %>%
+  left_join(files, by= c("file_canvas_id"= "canvas_id"), 
+            suffix= c(".quiz", ".file")) 
+
+#Checking if the merging worked
+colnames(req_crs_disc_assgn_quiz_files)
+table(req_crs_disc_assgn_quiz_files$name.file) 
+```
+
+<br>
+
+## The **ifelse()** Function
+
+### Using one condition
+
+Another method to create new variables is by applying conditions to existing variables. The `ifelse()` function serves as a conditional tool that evaluates a given condition, returning one value if the condition is true and a different value if it is false. For instance, we discovered that only the "Biology" students passed their final exams, whereas students from other majors failed. The syntax for `ifelse()` is: **ifelse(condition, yes, no)**.
+
+```{r}
+#Create a new variable using the `ifelse()` syntax on students to add the "pass_fail" variable
+req_crs_disc_assgn_quiz_files<- req_crs_disc_assgn_quiz_files %>%
+  mutate(pass_fail= ifelse(course_name=="Biology", "Pass", "Fail"))
+
+#Check to see if we used the syntax properly
+table(req_crs_disc_assgn_quiz_files$course_name, 
+      req_crs_disc_assgn_quiz_files$pass_fail)
+```
+
+<br>
+
+### Nested ifelse() for multiple conditions
+
+It worked well for our single condition, but what if we have multiple conditions to evaluate? While nesting `ifelse()` functions can be done, it quickly becomes complex and hard to read. Let's say we want to create a new variable indicating our confidence level regarding whether a request is a click or not. We can use the previous vectors we made containing the actions and controllers we want to keep or not, while also adding the "ping" value we agreed is not a click.
+
+```{r}
+#The previous vectors used for our decision
+actions_keep<- c("show", "create")
+controllers_remove<- c("quizzes/quiz_submission_api", "discussion_topics_api", "wiki_pages_api")
+
+#Create the "click_confidence" variable using nested `ifelse()"
+req_crs_disc_assgn_quiz_files <- req_crs_disc_assgn_quiz_files %>%
+  mutate(click_confidence_nested= 
+           ifelse(web_application_action %in% actions_keep, "click_confidence", #we are sure these are clicks
+                  ifelse(web_application_controller %in% controllers_remove,
+                         "non_click_confidence", #we are sure these are non-clicks
+                         ifelse(web_application_action== "ping", 
+                                "non_click_confidence", "Unknown"))))
+
+#It seems to have worked
+table(req_crs_disc_assgn_quiz_files$click_confidence_nested,
+      req_crs_disc_assgn_quiz_files$web_application_action)
+
+```
+
+<br>
+
+## The **case_when()** Function
+
+A better approach (and recommended) is to use the `case_when()` function instead of nested `ifelse()`, which allows for handling multiple conditions in a more concise and readable manner. The syntax for case_when is way easier to understand: **case_when(condition \~ value, condition2 \~ value2, ..., TRUE \~ default_value)**
+
+```{r}
+#Create the "click_confidence" variable using the "case_when()" function
+req_crs_disc_assgn_quiz_files <- req_crs_disc_assgn_quiz_files %>%
+  mutate(click_confidence_case_when = case_when(
+    web_application_action %in% actions_keep ~ 
+      "click_confidence", # we are sure these are clicks
+    web_application_controller %in% controllers_remove ~ "non_click_confidence", # we are sure these are non-clicks
+    web_application_action == "ping" ~ "non_click_confidence", # ping actions are non-clicks
+    TRUE ~ "Unknown" # default for other cases
+  ))
+
+#Check if the methods are identical (TRUE)
+identical(req_crs_disc_assgn_quiz_files$click_confidence_nested,
+          req_crs_disc_assgn_quiz_files$click_confidence_case_when)
+
+```
+
+<br><br>
+
+## The **group_by()** and **summarize()** Functions
+
+The `group_by()` and `summarize()` functions are powerful tools for data manipulation, allowing you to group your data and then apply summary statistics to each group. The `group_by()` function is used to group data by one or more variables. Once the data is grouped, any subsequent operations (such as summarizing) will be performed within each group separately. The `summarize()` (or `summarise()`, depending on American or British spelling) function is used to create summary statistics for each group. You can compute aggregates like mean, median, sum, count, etc. Let's exemplify this by grouping by the courses and calculate the number of requests, number of distinct students, and number of assignment, quizzes, and discussion requests, all per courses.
+
+```{r}
+#Calculate some descriptive data about our dataset, grouping by courses
+summary_data <- req_crs_disc_assgn_quiz_files %>%
+  group_by(course_name) %>%
+  summarize(
+    requests= n(),
+    students= n_distinct(student_id),
+    count_assignemnts = sum(!is.na(assignment_id)),
+    count_quizzes = sum(!is.na(quiz_id)),
+    count_discussions = sum(!is.na(discussion_id))
+  )
+
+#A new table was formed which you can simply print
+print(summary_data)
+```
+
+<br><br>
+
+## Chapter 3 Recap
+
+In this chapter, we covered a comprehensive range of topics essential for starting to program and use exploratory functions during Part 1 (LINK), and data manipulation, and pre-processing student trace data during Part 2. During Part 2, we guided users through the processes of merging datasets, selectively importing functions, and describing the Canvas data structure. We explored the `_join()` family of functions for merging datasets with the same or different key names and handling multiple keys with identical variable names using suffixes. The tutorial also included practical steps for counting NAs and logical values, saving datasets, and various data pre-processing techniques. We delved into the use of the `select()` and `filter()` functions, differentiating between server requests and student clicks, and filtering based on single or multiple variable values. The `mutate()` function was introduced for data transformation, along with the `ifelse()` function for conditional statements, including nested `ifelse()` for complex conditions, and the `case_when()` function for multiple conditions. Finally, we covered the `group_by()` and `summarize()` functions for aggregating data, providing a solid foundation for effective data analysis in R. This chapter's focus on preparing and cleaning data ensures that you are equipped with the necessary skills to perform more advanced analyses, setting the stage for the deeper insights to be uncovered in the subsequent chapters, such as Chapter 4 (creating unobtrusive measurements of SRL), (LINK) and Chapter 5 (using pattern analysis to find tactics and strategies of students' trace data) (LINK).
