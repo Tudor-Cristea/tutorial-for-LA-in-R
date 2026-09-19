@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+title: Tutorial for Learning Analytics in R
+message: >-
+  If you use this tutorial, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Tudor
+    family-names: Cristea
+    affiliation: Eindhoven University of Technology
+    orcid: 'https://orcid.org/0000-0003-1377-0971'
+repository-code: 'https://github.com/Tudor-Cristea/tutorial-for-LA-in-R'
+abstract: >-
+  A step-by-step R tutorial for researchers with little or no
+  programming experience who want to work with learning
+  management system (Canvas) trace data. Uses synthetic
+  example data. Chapter 3 of the author's PhD dissertation.
+keywords:
+  - learning analytics
+  - R
+  - Canvas
+  - trace data
+  - tutorial
+license: MIT
+version: 1.0.0
